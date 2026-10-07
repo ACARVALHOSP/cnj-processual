@@ -1,4 +1,4 @@
-Copyright (c) 2026 [NOME OU RAZÃO SOCIAL A DEFINIR]
+Copyright (c) 2026 Ariel Carvalho
 
 PolyForm Noncommercial License 1.0.0
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
