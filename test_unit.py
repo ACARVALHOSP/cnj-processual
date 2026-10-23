@@ -18,7 +18,10 @@ from unittest import mock
 
 import httpx
 
-import server
+import cnj_processual._app as _app_mod
+import cnj_processual.datajud as _datajud_mod
+import cnj_processual.djen as _djen_mod
+import cnj_processual.utils as _utils_mod
 
 
 def _rodar(coro):
@@ -29,17 +32,17 @@ class _Simulado:
     """Prepara o transporte HTTP simulado e zera os backoffs para os testes rodarem rápido."""
 
     def setUp(self):
-        self._transporte_original = server._TRANSPORTE_HTTP
+        self._transporte_original = _utils_mod._TRANSPORTE_HTTP
         self._patches = [
-            mock.patch.object(server, "DATAJUD_BACKOFF_S", 0),
-            mock.patch.object(server, "DJEN_BACKOFF_S", 0),
+            mock.patch.object(_datajud_mod, "DATAJUD_BACKOFF_S", 0),
+            mock.patch.object(_djen_mod, "DJEN_BACKOFF_S", 0),
         ]
         for p in self._patches:
             p.start()
         self.chamadas: list[httpx.Request] = []
 
     def tearDown(self):
-        server._TRANSPORTE_HTTP = self._transporte_original
+        _utils_mod._TRANSPORTE_HTTP = self._transporte_original
         for p in self._patches:
             p.stop()
 
@@ -54,7 +57,7 @@ class _Simulado:
                 raise item
             return item
 
-        server._TRANSPORTE_HTTP = httpx.MockTransport(handler)
+        _utils_mod._TRANSPORTE_HTTP = httpx.MockTransport(handler)
 
 
 def _json(status: int, corpo) -> httpx.Response:
@@ -113,23 +116,23 @@ DJEN_OK = {
 
 class UtilitariosTest(unittest.TestCase):
     def test_so_digitos_remove_mascara(self):
-        self.assertEqual(server._so_digitos("1006314-27.2023.8.26.0005"), "10063142720238260005")
-        self.assertEqual(server._so_digitos(None), "")
+        self.assertEqual(_utils_mod._so_digitos("1006314-27.2023.8.26.0005"), "10063142720238260005")
+        self.assertEqual(_utils_mod._so_digitos(None), "")
 
     def test_html_para_texto_decodifica_e_remove_tags_e_script(self):
-        texto = server._html_para_texto("<p>Pra&ccedil;a &aacute; <b>negrito</b></p><script>x=1</script>")
+        texto = _utils_mod._html_para_texto("<p>Pra&ccedil;a &aacute; <b>negrito</b></p><script>x=1</script>")
         self.assertEqual(texto, "Praça á negrito")
 
     def test_total_hits_aceita_dict_e_inteiro(self):
-        self.assertEqual(server._total_hits({"total": {"value": 7}}), 7)
-        self.assertEqual(server._total_hits({"total": 3}), 3)
-        self.assertEqual(server._total_hits({}), 0)
-        self.assertEqual(server._total_hits({"total": "x"}), 0)
+        self.assertEqual(_utils_mod._total_hits({"total": {"value": 7}}), 7)
+        self.assertEqual(_utils_mod._total_hits({"total": 3}), 3)
+        self.assertEqual(_utils_mod._total_hits({}), 0)
+        self.assertEqual(_utils_mod._total_hits({"total": "x"}), 0)
 
     def test_validar_data(self):
-        self.assertIsNone(server._validar_data("x", "2026-08-01"))
-        self.assertIsNone(server._validar_data("x", None))
-        self.assertIsNotNone(server._validar_data("x", "01/08/2026"))
+        self.assertIsNone(_djen_mod._validar_data("x", "2026-08-01"))
+        self.assertIsNone(_djen_mod._validar_data("x", None))
+        self.assertIsNotNone(_djen_mod._validar_data("x", "01/08/2026"))
 
 
 class DataJudTest(_Simulado, unittest.TestCase):
@@ -138,7 +141,7 @@ class DataJudTest(_Simulado, unittest.TestCase):
         self.processo = "1006314-27.2023.8.26.0005"
 
     def consultar(self, tribunal="tjsp", numero=None):
-        return _rodar(server.consultar_processo_datajud(tribunal=tribunal, numero_processo=numero or self.processo))
+        return _rodar(_datajud_mod.consultar_processo_datajud(tribunal=tribunal, numero_processo=numero or self.processo))
 
     def test_entrada_invalida_nao_faz_chamada_de_rede(self):
         self.responder(_json(200, DATAJUD_OK))
@@ -164,7 +167,7 @@ class DataJudTest(_Simulado, unittest.TestCase):
         self.responder(_json(200, DATAJUD_OK))
         self.consultar()
         req = self.chamadas[0]
-        self.assertEqual(str(req.url), f"{server.DATAJUD_BASE_URL}/api_publica_tjsp/_search")
+        self.assertEqual(str(req.url), f"{_datajud_mod.DATAJUD_BASE_URL}/api_publica_tjsp/_search")
         self.assertTrue(req.headers["Authorization"].startswith("APIKey "))
         self.assertEqual(json.loads(req.content), {"query": {"match": {"numeroProcesso": "10063142720238260005"}}})
 
@@ -192,7 +195,7 @@ class DataJudTest(_Simulado, unittest.TestCase):
         r = self.consultar()
         self.assertTrue(r["erro"])
         self.assertIn("timeout", r["mensagem"])
-        self.assertEqual(len(self.chamadas), server.DATAJUD_TENTATIVAS)
+        self.assertEqual(len(self.chamadas), _datajud_mod.DATAJUD_TENTATIVAS)
 
     def test_503_seguido_de_sucesso(self):
         self.responder(httpx.Response(503), _json(200, DATAJUD_OK))
@@ -224,7 +227,7 @@ class DataJudTest(_Simulado, unittest.TestCase):
 
 class DjenTest(_Simulado, unittest.TestCase):
     def consultar(self, **kwargs):
-        return _rodar(server.consultar_publicacoes_djen(**kwargs))
+        return _rodar(_djen_mod.consultar_publicacoes_djen(**kwargs))
 
     def test_exige_processo_ou_oab(self):
         self.responder(_json(200, DJEN_OK))
@@ -278,7 +281,7 @@ class DjenTest(_Simulado, unittest.TestCase):
         self.responder(httpx.Response(502), httpx.Response(502))
         r = self.consultar(numero_oab="1")
         self.assertTrue(r["erro"])
-        self.assertEqual(len(self.chamadas), server.DJEN_TENTATIVAS)
+        self.assertEqual(len(self.chamadas), _djen_mod.DJEN_TENTATIVAS)
 
     def test_404_nao_e_repetido(self):
         self.responder(httpx.Response(404, text="nada"))
@@ -294,7 +297,7 @@ class CertidaoTest(_Simulado, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self._dir_temp = tempfile.TemporaryDirectory()
-        self._dir_patch = mock.patch.object(server, "CERTIDAO_DIR", Path(self._dir_temp.name))
+        self._dir_patch = mock.patch.object(_djen_mod, "CERTIDAO_DIR", Path(self._dir_temp.name))
         self._dir_patch.start()
 
     def tearDown(self):
@@ -303,7 +306,7 @@ class CertidaoTest(_Simulado, unittest.TestCase):
         super().tearDown()
 
     def baixar(self, hash_="abc123"):
-        return _rodar(server.baixar_certidao_djen(hash=hash_))
+        return _rodar(_djen_mod.baixar_certidao_djen(hash=hash_))
 
     def test_hash_invalido_nao_faz_chamada(self):
         self.responder(httpx.Response(200, content=b"%PDF-1.4"))
@@ -327,7 +330,7 @@ class CertidaoTest(_Simulado, unittest.TestCase):
     def test_remove_certidoes_mais_antigas_que_a_retencao(self):
         antiga = Path(self._dir_temp.name) / "certidao_antiga.pdf"
         antiga.write_bytes(b"%PDF")
-        velha = time.time() - (server.CERTIDAO_RETENCAO_DIAS + 1) * 86400
+        velha = time.time() - (_djen_mod.CERTIDAO_RETENCAO_DIAS + 1) * 86400
         os.utime(antiga, (velha, velha))
         recente = Path(self._dir_temp.name) / "certidao_recente.pdf"
         recente.write_bytes(b"%PDF")
@@ -341,7 +344,7 @@ class CertidaoTest(_Simulado, unittest.TestCase):
 
 class RegistroDeToolsTest(unittest.TestCase):
     def test_tres_tools_registradas(self):
-        nomes = {t.name for t in _rodar(server.mcp.list_tools())}
+        nomes = {t.name for t in _rodar(_app_mod.mcp.list_tools())}
         self.assertEqual(nomes, {"consultar_processo_datajud", "consultar_publicacoes_djen", "baixar_certidao_djen"})
 
 
